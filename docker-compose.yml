@@ -1,0 +1,87 @@
+version: '3.7'
+services:
+  sw_mongo:
+    container_name: sw_mongo
+    image: mongo:4.4.11
+    ports:
+      - 27017:27017
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${mongodb_admin_db_username}
+      - MONGO_INITDB_ROOT_PASSWORD=${mongodb_admin_db_password}
+      - SW_MONGO_INITDB_SWIMLANE_USERNAME=${mongodb_swimlane_db_username}
+      - SW_MONGO_INITDB_SWIMLANE_PASSWORD=${mongodb_swimlane_db_password}
+    secrets:
+      - mongodb.pem
+    networks:
+      internal_network:
+        aliases:
+          - sw-mongo
+          - sw-mongo.swimlane.io
+    volumes:
+      - 'mongodb:/data/db'
+      - './init-mongodb-users.sh:/docker-entrypoint-initdb.d/init-mongodb-users.sh'
+    command: '--tlsMode requireTLS --tlsCertificateKeyFile /run/secrets/mongodb.pem'
+
+  sw_api:
+    container_name: sw_api
+    image: swimlane/swimlane-api:10.8.0
+    depends_on:
+      - sw_mongo
+    ports:
+      - 5001:5000
+    restart: unless-stopped
+    environment:
+      - SWIMLANE_Data__Mongo__HistoryConnectionString=mongodb://${mongodb_swimlane_db_username}:${mongodb_swimlane_db_password}@sw-mongo.swimlane.io:27017/SwimlaneHistory?ssl=true&sslVerifyCertificate=false
+      - SWIMLANE_Data__Mongo__SwimlaneConnectionString=mongodb://${mongodb_swimlane_db_username}:${mongodb_swimlane_db_password}@sw-mongo.swimlane.io:27017/Swimlane?ssl=true&sslVerifyCertificate=false
+      - ASPNETCORE_ENVIRONMENT=Development
+      - SWIMLANE_EnableHA=false
+      - SWIMLANE_Logging__IncludeAudit=true
+      - SWIMLANE_Logging__Level=Info
+      - WAIT_FOR=tcp://sw-mongo.swimlane.io:27017
+      - SWIMLANE_Orchestration__BaseUrl=http://sw_turbine_api:3000/v1/
+      - SWIMLANE_Orchestration__UserName=${orchestration_api_username}
+      - SWIMLANE_Orchestration__Password=${orchestration_api_password}
+      - SWIMLANE_FeatureManagement__DynamicOrchestration=false
+      - SWIMLANE_FeatureManagement__RecordPage=false
+      - SWIMLANE_FeatureManagement__PlaybookYamlEditor=true
+      - SWIMLANE_FeatureManagement__PlaybookActionsDialog=true
+      - SWIMLANE_FeatureManagement__SearchPage=false
+      - SWIMLANE_FeatureManagement__HideSspImportExport=false
+      - SWIMLANE_FeatureManagement__EnableConnectors=false
+      - SWIMLANE_OpenSSL__MinProtocol=TLSv1.2
+      - SWIMLANE_OpenSSL__CipherString=DEFAULT@SECLEVEL=2
+      - SWIMLANE_ReportsService__BaseUrl=http://sw-reports:4000/
+      - SWIMLANE_Python3Version=3.7.12
+      - SWIMLANE_Telemetry__Collector__Endpoint=http://sw-otel-collector:4317
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=Swimlane.Api,service.version=1.1,deployment.environment=development
+    volumes:
+      - 'api_blinkbinaries:/app/BlinkBinariesLinux'
+      - 'api_temp:/app/Api/temp'
+      - 'api_python3_site_packages:/python-3-site-packages'
+    secrets:
+      - database_encryption_key
+    networks:
+      internal_network:
+        aliases:
+          - sw-api
+
+volumes:
+  api_blinkbinaries:
+    external: false
+  api_temp:
+    external: false
+  mongodb:
+    external: false
+  api_python3_site_packages:
+    external: false
+
+networks:
+  internal_network:
+    driver: bridge
+
+secrets:
+  database_encryption_key:
+    file: ./secrets/database_encryption.key
+  mongodb.pem:
+    file: ./secrets/mongodb.pem
